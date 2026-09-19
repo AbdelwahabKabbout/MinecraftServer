@@ -1,0 +1,42 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+*.tsbuildinfo
+
+# Environment / secrets
+.env
+.env.local
+.env.*.local
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# SQLite database files
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Backend runtime data (SQLite, uploaded artifacts)
+backend/data/
+
+# Server runtime directories (Minecraft runs here, not in VCS)
+servers/*
+!servers/.gitkeep
+
+# Modpack / downloaded artifacts
+*.jar
+*.mrpack
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor / IDE
+.idea/
+.vscode/
