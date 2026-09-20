@@ -51,3 +51,24 @@ export const consoleLogs = sqliteTable(
 
 export type ConsoleLogRow = typeof consoleLogs.$inferSelect;
 export type NewConsoleLogRow = typeof consoleLogs.$inferInsert;
+
+/**
+ * `modpacks` stores modpack metadata; the manifest JSON is the source of truth
+ * and lives verbatim in `manifest`. Mod files themselves stay on disk inside a
+ * server's `mods/` directory — this table references no files.
+ */
+export const modpacks = sqliteTable("modpacks", {
+  id: text("id").primaryKey(),
+  slug: text("slug").notNull().unique(),
+  name: text("name").notNull(),
+  version: text("version").notNull(),
+  minecraftVersion: text("minecraft_version").notNull(),
+  loader: text("loader").notNull().default("fabric"),
+  loaderVersion: text("loader_version"),
+  manifest: text("manifest").notNull(),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
+export type ModpackRow = typeof modpacks.$inferSelect;
+export type NewModpackRow = typeof modpacks.$inferInsert;

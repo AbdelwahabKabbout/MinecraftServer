@@ -6,6 +6,7 @@ import { env } from "./config/index.js";
 import { logger } from "./config/logger.js";
 import { healthRoutes } from "./routes/health.js";
 import { serverRoutes } from "./routes/servers.js";
+import { modpackRoutes } from "./routes/modpacks.js";
 import { buildErrorHandler } from "./routes/errorHandler.js";
 import { wsHub } from "./websocket/hub.js";
 
@@ -40,6 +41,7 @@ export async function buildApp(options: { logger?: boolean } = {}): Promise<Fast
 
   await app.register(healthRoutes);
   await app.register(serverRoutes);
+  await app.register(modpackRoutes);
 
   app.addHook("onClose", async () => {
     logger.info("Shutting down API server");
