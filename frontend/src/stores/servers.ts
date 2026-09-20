@@ -9,6 +9,9 @@ import {
   type ConsoleLine,
   type ServerPropertiesDoc,
   type ServerPropertiesPatch,
+  type ServerMetricsDoc,
+  type PlayersDoc,
+  type PlayerActivity,
 } from "@/services/servers";
 import { WsClient, type HubEvent } from "@/services/websocket";
 import { ApiClientError } from "@/services/api";
@@ -24,6 +27,8 @@ interface ServerViewState {
   detections: Record<string, DetectionReport>;
   consoleLines: Record<string, ConsoleLine[]>;
   properties: Record<string, ServerPropertiesDoc>;
+  metrics: Record<string, ServerMetricsDoc>;
+  players: Record<string, PlayersDoc>;
   live: boolean;
   connectedOnce: boolean;
 }
@@ -36,6 +41,8 @@ export const useServersStore = defineStore("servers", {
     detections: {},
     consoleLines: {},
     properties: {},
+    metrics: {},
+    players: {},
     live: false,
     connectedOnce: false,
   }),
@@ -178,6 +185,52 @@ export const useServersStore = defineStore("servers", {
       }
     },
 
+    async fetchMetrics(id: string): Promise<void> {
+      try {
+        this.metrics[id] = await serverService.metrics(id);
+      } catch (error) {
+        this.error = this.messageFor(error);
+      }
+    },
+
+    async fetchPlayers(id: string): Promise<void> {
+      try {
+        this.players[id] = await serverService.players(id);
+      } catch (error) {
+        this.error = this.messageFor(error);
+      }
+    },
+
+    applyMetricsEvent(id: string, snapshot: ServerMetricsDoc["snapshot"]): void {
+      const existing = this.metrics[id];
+      if (!existing) {
+        this.metrics[id] = { running: true, pid: null, startedAt: null, snapshot, history: snapshot ? [snapshot] : [] };
+        return;
+      }
+      existing.running = true;
+      existing.snapshot = snapshot;
+      if (snapshot) {
+        existing.history = [...existing.history, snapshot].slice(-144);
+      }
+    },
+
+    applyPlayerEvent(id: string, player: string, action: PlayerActivity["action"], timestamp: number, online: string[]): void {
+      const existing = this.players[id];
+      const activity: PlayerActivity = { player, action, timestamp };
+      if (existing) {
+        existing.online = online;
+        existing.running = true;
+        existing.activity = [...existing.activity, activity].slice(-100);
+      } else {
+        this.players[id] = { running: true, online, activity: [activity] };
+      }
+    },
+
+    clearLiveState(id: string): void {
+      this.metrics[id] = { running: false, pid: null, startedAt: null, snapshot: null, history: [] };
+      this.players[id] = { running: false, online: [], activity: [] };
+    },
+
     async start(id: string): Promise<string | null> {
       return this.lifecycle(id, (sid) => serverService.start(sid));
     },
@@ -209,12 +262,23 @@ export const useServersStore = defineStore("servers", {
         if (event.type === "server.status") {
           const server = this.byId(event.serverId);
           if (server) server.status = event.status as ServerStatus;
+          if (event.status === "OFFLINE" || event.status === "CRASHED") {
+            this.clearLiveState(event.serverId);
+          }
         } else if (event.type === "server.console") {
           const lines = this.consoleLines[event.serverId] ?? [];
           lines.push({ line: event.line, timestamp: event.timestamp });
           this.consoleLines[event.serverId] = lines.slice(-MAX_CONSOLE_LINES);
         } else if (event.type === "server.consoleCleared") {
           this.consoleLines[event.serverId] = [];
+        } else if (event.type === "server.metrics") {
+          if (event.running) {
+            this.applyMetricsEvent(event.serverId, event.snapshot);
+          } else {
+            this.clearLiveState(event.serverId);
+          }
+        } else if (event.type === "server.playerActivity") {
+          this.applyPlayerEvent(event.serverId, event.player, event.action, event.timestamp, event.online);
         }
       });
       liveClient.connect();

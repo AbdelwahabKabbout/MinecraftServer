@@ -16,12 +16,36 @@ export interface ServerConsoleClearedEvent {
   serverId: string;
 }
 
+export interface ServerMetricsEvent {
+  type: "server.metrics";
+  serverId: string;
+  running: boolean;
+  pid: number | null;
+  startedAt: number | null;
+  snapshot: { timestamp: number; cpuPercent: number | null; memoryMb: number } | null;
+}
+
+export interface ServerPlayerActivityEvent {
+  type: "server.playerActivity";
+  serverId: string;
+  player: string;
+  action: "joined" | "left";
+  timestamp: number;
+  online: string[];
+}
+
 export interface HubHelloEvent {
   type: "hub.hello";
   uptimeSeconds: number;
 }
 
-export type HubEvent = ServerStatusEvent | ServerConsoleEvent | ServerConsoleClearedEvent | HubHelloEvent;
+export type HubEvent =
+  | ServerStatusEvent
+  | ServerConsoleEvent
+  | ServerConsoleClearedEvent
+  | ServerMetricsEvent
+  | ServerPlayerActivityEvent
+  | HubHelloEvent;
 
 type Handler = (event?: HubEvent) => void;
 

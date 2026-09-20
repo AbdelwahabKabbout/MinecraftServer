@@ -74,6 +74,32 @@ export interface ServerPropertiesPatch {
   raw?: string;
 }
 
+export interface MetricsSample {
+  timestamp: number;
+  cpuPercent: number | null;
+  memoryMb: number;
+}
+
+export interface ServerMetricsDoc {
+  running: boolean;
+  pid: number | null;
+  startedAt: number | null;
+  snapshot: MetricsSample | null;
+  history: MetricsSample[];
+}
+
+export interface PlayerActivity {
+  player: string;
+  action: "joined" | "left";
+  timestamp: number;
+}
+
+export interface PlayersDoc {
+  running: boolean;
+  online: string[];
+  activity: PlayerActivity[];
+}
+
 export const serverService = {
   list(): Promise<ManagedServer[]> {
     return apiGet<ManagedServer[]>("/servers");
@@ -120,6 +146,12 @@ export const serverService = {
   },
   saveProperties(id: string, payload: ServerPropertiesPatch): Promise<ServerPropertiesDoc> {
     return apiPut<ServerPropertiesDoc>(`/servers/${id}/properties`, payload);
+  },
+  metrics(id: string): Promise<ServerMetricsDoc> {
+    return apiGet<ServerMetricsDoc>(`/servers/${id}/metrics`);
+  },
+  players(id: string): Promise<PlayersDoc> {
+    return apiGet<PlayersDoc>(`/servers/${id}/players`);
   },
 };
 
