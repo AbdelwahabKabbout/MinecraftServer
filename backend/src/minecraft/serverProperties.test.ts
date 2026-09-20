@@ -1,5 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { parseProperties, parseSingle, setProperty, parseBoolean, parsePort } from "./serverProperties.js";
+import {
+  parseProperties,
+  parseSingle,
+  setProperty,
+  removeProperty,
+  validatePropertiesText,
+  isValidPropertyKey,
+  parseBoolean,
+  parsePort,
+} from "./serverProperties.js";
 
 const BASE = [
   "#Minecraft server properties",
@@ -65,5 +74,40 @@ describe("serverProperties", () => {
     expect(parsePort("99999")).toBeUndefined();
     expect(parsePort("abc")).toBeUndefined();
     expect(parsePort(undefined)).toBeUndefined();
+  });
+
+  it("removes a key while preserving other lines", () => {
+    const out = removeProperty(BASE, "motd");
+    expect(parseSingle(out, "motd")).toBeUndefined();
+    expect(parseSingle(out, "server-port")).toBe("25565");
+    expect(out).toContain("#Minecraft server properties");
+  });
+
+  it("removing a missing key is a no-op", () => {
+    const out = removeProperty(BASE, "ghost-key");
+    expect(parseProperties(out).size).toBe(parseProperties(BASE).size);
+  });
+
+  it("validates property keys", () => {
+    expect(isValidPropertyKey("max-players")).toBe(true);
+    expect(isValidPropertyKey("network_compression_threshold")).toBe(true);
+    expect(isValidPropertyKey("online-mode")).toBe(true);
+    expect(isValidPropertyKey("rcon.password")).toBe(true);
+    expect(isValidPropertyKey("rcon.port")).toBe(true);
+    expect(isValidPropertyKey("Bad Key")).toBe(false);
+    expect(isValidPropertyKey("upperCase")).toBe(false);
+    expect(isValidPropertyKey("")).toBe(false);
+    expect(isValidPropertyKey("a".repeat(65))).toBe(false);
+  });
+
+  it("reports invalid lines in a properties document", () => {
+    const issues = validatePropertiesText("#ok\nserver-port=25565\nMOTD=x\n\nnot-a-pair line\n");
+    expect(issues).toHaveLength(2);
+    expect(issues[0]).toEqual({ line: 3, reason: 'invalid property key "MOTD"' });
+    expect(issues[1].line).toBe(5);
+  });
+
+  it("accepts a clean document", () => {
+    expect(validatePropertiesText("#Minecraft\n!generated\nserver-port=25565\nmotd=hi\n\n")).toHaveLength(0);
   });
 });

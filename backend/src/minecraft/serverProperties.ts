@@ -39,6 +39,48 @@ export function parseSingle(text: string, key: string): string | undefined {
   return parseProperties(text).get(key);
 }
 
+const PROPERTY_KEY_PATTERN = /^[a-z0-9._-]{1,64}$/;
+
+export function isValidPropertyKey(key: string): boolean {
+  return PROPERTY_KEY_PATTERN.test(key);
+}
+
+/** Removes the `key=value` line from a properties document, keeping everything else intact. */
+export function removeProperty(text: string, key: string): string {
+  return text
+    .split(/\r?\n/)
+    .filter((line) => {
+      const m = KEY_VALUE.exec(line);
+      return !(m !== null && m[1]!.trim() === key);
+    })
+    .join("\n");
+}
+
+/**
+ * Line-level validation of an arbitrary properties document. Returns one entry
+ * per offending line (1-indexed) with a human-readable reason.
+ */
+export function validatePropertiesText(text: string): Array<{ line: number; reason: string }> {
+  const issues: Array<{ line: number; reason: string }> = [];
+  const lines = text.split(/\r?\n/);
+  lines.forEach((raw, index) => {
+    const trimmed = raw.trim();
+    if (trimmed === "" || trimmed.startsWith("#") || trimmed.startsWith("!")) return;
+    const m = KEY_VALUE.exec(raw);
+    if (!m) {
+      issues.push({ line: index + 1, reason: "not a key=value line" });
+      return;
+    }
+    const key = m[1]!.trim();
+    if (!isValidPropertyKey(key)) {
+      issues.push({ line: index + 1, reason: `invalid property key "${key}"` });
+    } else if (m[2]!.includes("\n") || m[2]!.includes("\r")) {
+      issues.push({ line: index + 1, reason: "property value contains a newline" });
+    }
+  });
+  return issues;
+}
+
 /**
  * Updates `key` in the document, preserving every other line (comments,
  * ordering, formatting) exactly as it was. Returns the new document text.

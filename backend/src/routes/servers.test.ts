@@ -23,6 +23,12 @@ function body(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function makeRealDir(dirName: string): string {
+  const dir = path.join(serverRoot, dirName);
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
 beforeAll(async () => {
   const { runMigrations } = await import("../db/migrate.js");
   runMigrations();
@@ -227,5 +233,162 @@ describe("/api/servers console", () => {
 
     await app.inject({ method: "DELETE", url: `/api/servers/${created.id}` });
     expect(consoleRepository.count(created.id)).toBe(0);
+  });
+});
+
+describe("/api/servers properties", () => {
+  it("reports exists=false when no properties file exists", async () => {
+    const dirName = "prop-empty-" + Date.now();
+    makeRealDir(dirName);
+    const created = (await app.inject({ method: "POST", url: "/api/servers", payload: body({ serverDirectory: dirName }) })).json().data;
+
+    const res = await app.inject({ method: "GET", url: `/api/servers/${created.id}/properties` });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().data.exists).toBe(false);
+    expect(res.json().data.text).toBeNull();
+    expect(res.json().data.path).toBe(`${dirName}/server.properties`);
+  });
+
+  it("creates a properties file from a structured patch and returns it", async () => {
+    const dirName = "prop-create-" + Date.now();
+    makeRealDir(dirName);
+    const created = (await app.inject({ method: "POST", url: "/api/servers", payload: body({ serverDirectory: dirName }) })).json().data;
+
+    const res = await app.inject({
+      method: "PUT",
+      url: `/api/servers/${created.id}/properties`,
+      payload: { values: { "server-port": "25570", motd: "Hello" } },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().data.exists).toBe(true);
+    expect(res.json().data.pairs).toContainEqual({ key: "server-port", value: "25570" });
+
+    const file = path.join(serverRoot, dirName, "server.properties");
+    expect(fs.existsSync(file)).toBe(true);
+    const text = fs.readFileSync(file, "utf8");
+    expect(text).toContain("motd=Hello");
+  });
+
+  it("patches a single key and preserves comments and unknown keys", async () => {
+    const dirName = "prop-patch-" + Date.now();
+    const dir = makeRealDir(dirName);
+    fs.writeFileSync(
+      path.join(dir, "server.properties"),
+      "#Minecraft server properties\nmotd=A lovely server\nsome-future-key=whatever\n",
+    );
+    const created = (await app.inject({ method: "POST", url: "/api/servers", payload: body({ serverDirectory: dirName }) })).json().data;
+
+    const res = await app.inject({
+      method: "PUT",
+      url: `/api/servers/${created.id}/properties`,
+      payload: { values: { motd: "New MOTD" } },
+    });
+    expect(res.statusCode).toBe(200);
+    const text = res.json().data.text;
+    expect(text).toContain("#Minecraft server properties");
+    expect(text).toContain("some-future-key=whatever");
+    expect(text.match(/motd=New MOTD/g)).toHaveLength(1);
+
+    const read = await app.inject({ method: "GET", url: `/api/servers/${created.id}/properties` });
+    expect(read.json().data.pairs).toContainEqual({ key: "motd", value: "New MOTD" });
+  });
+
+  it("removes a key when its value is null", async () => {
+    const dirName = "prop-remove-" + Date.now();
+    const dir = makeRealDir(dirName);
+    fs.writeFileSync(path.join(dir, "server.properties"), "#Minecraft server properties\nwhite-list=false\n");
+    const created = (await app.inject({ method: "POST", url: "/api/servers", payload: body({ serverDirectory: dirName }) })).json().data;
+
+    const res = await app.inject({
+      method: "PUT",
+      url: `/api/servers/${created.id}/properties`,
+      payload: { values: { "white-list": null } },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().data.text).not.toContain("white-list");
+    expect(res.json().data.text).toContain("#Minecraft server properties");
+  });
+
+  it("writes raw properties text verbatim", async () => {
+    const dirName = "prop-raw-" + Date.now();
+    makeRealDir(dirName);
+    const created = (await app.inject({ method: "POST", url: "/api/servers", payload: body({ serverDirectory: dirName }) })).json().data;
+
+    const res = await app.inject({
+      method: "PUT",
+      url: `/api/servers/${created.id}/properties`,
+      payload: { raw: "#Minecraft server properties\nmax-players=25\n" },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().data.text).toBe("#Minecraft server properties\nmax-players=25\n");
+    expect(res.json().data.pairs).toContainEqual({ key: "max-players", value: "25" });
+  });
+
+  it("rejects a structured patch with an invalid key or newline value", async () => {
+    const dirName = "prop-bad-" + Date.now();
+    makeRealDir(dirName);
+    const created = (await app.inject({ method: "POST", url: "/api/servers", payload: body({ serverDirectory: dirName }) })).json().data;
+
+    const badKey = await app.inject({
+      method: "PUT",
+      url: `/api/servers/${created.id}/properties`,
+      payload: { values: { "My MOTD": "x" } },
+    });
+    expect(badKey.statusCode).toBe(400);
+    expect(badKey.json().error.code).toBe("VALIDATION_ERROR");
+
+    const badValue = await app.inject({
+      method: "PUT",
+      url: `/api/servers/${created.id}/properties`,
+      payload: { values: { motd: "line one\nline two" } },
+    });
+    expect(badValue.statusCode).toBe(400);
+  });
+
+  it("rejects malformed raw content with a line-level report", async () => {
+    const dirName = "prop-badraw-" + Date.now();
+    makeRealDir(dirName);
+    const created = (await app.inject({ method: "POST", url: "/api/servers", payload: body({ serverDirectory: dirName }) })).json().data;
+
+    const res = await app.inject({
+      method: "PUT",
+      url: `/api/servers/${created.id}/properties`,
+      payload: { raw: "server-port=25565\nBad Line Here\n" },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error.code).toBe("PROPERTIES_INVALID");
+    expect(res.json().error.details).toHaveLength(1);
+  });
+
+  it("requires exactly one of values or raw", async () => {
+    const dirName = "prop-neither-" + Date.now();
+    makeRealDir(dirName);
+    const created = (await app.inject({ method: "POST", url: "/api/servers", payload: body({ serverDirectory: dirName }) })).json().data;
+
+    const both = await app.inject({
+      method: "PUT",
+      url: `/api/servers/${created.id}/properties`,
+      payload: { values: { motd: "x" }, raw: "motd=y\n" },
+    });
+    expect(both.statusCode).toBe(400);
+
+    const none = await app.inject({
+      method: "PUT",
+      url: `/api/servers/${created.id}/properties`,
+      payload: {},
+    });
+    expect(none.statusCode).toBe(400);
+  });
+
+  it("rejects updates when the server directory does not exist", async () => {
+    const created = (await app.inject({ method: "POST", url: "/api/servers", payload: body({ serverDirectory: "ghost-dir" }) })).json().data;
+
+    const res = await app.inject({
+      method: "PUT",
+      url: `/api/servers/${created.id}/properties`,
+      payload: { raw: "motd=x\n" },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error.code).toBe("SERVER_DIRECTORY_MISSING");
   });
 });

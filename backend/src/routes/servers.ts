@@ -1,8 +1,10 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { serverService } from "../services/serverService.js";
+import { propertiesService } from "../services/propertiesService.js";
 import { success } from "../utils/api.js";
 import { ApiError } from "../utils/api.js";
+import { isValidPropertyKey } from "../minecraft/serverProperties.js";
 
 const createServerSchema = z.object({
   name: z.string().trim().min(1, "Name is required").max(64),
@@ -21,6 +23,30 @@ const updateServerSchema = createServerSchema.partial();
 const commandSchema = z.object({
   command: z.string().min(1).max(1024),
 });
+
+const propertiesPatchSchema = z
+  .object({
+    values: z
+      .record(
+        z.string(),
+        z
+          .string()
+          .max(4096)
+          .refine((value) => !value.includes("\n") && !value.includes("\r"), "Value must not contain newlines")
+          .nullable(),
+      )
+      .refine(
+        (values) => Object.keys(values).every((key) => isValidPropertyKey(key)),
+        "Invalid property key",
+      )
+      .optional(),
+    raw: z.string().max(262_144).optional(),
+  })
+  .superRefine((value, ctx) => {
+    if ((value.raw === undefined) === (value.values === undefined)) {
+      ctx.addIssue({ code: "custom", message: "Provide exactly one of `values` or `raw`.", path: ["body"] });
+    }
+  });
 
 export async function serverRoutes(app: FastifyInstance): Promise<void> {
   app.get("/api/servers", async () => {
@@ -106,5 +132,25 @@ export async function serverRoutes(app: FastifyInstance): Promise<void> {
   app.delete("/api/servers/:id/console", async (request) => {
     const { id } = request.params as { id: string };
     return success(serverService.clearConsole(id));
+  });
+
+  app.get("/api/servers/:id/properties", async (request) => {
+    const { id } = request.params as { id: string };
+    return success(propertiesService.read(id));
+  });
+
+  app.put("/api/servers/:id/properties", async (request) => {
+    const { id } = request.params as { id: string };
+    const parsed = propertiesPatchSchema.safeParse(request.body);
+    if (!parsed.success) {
+      throw new ApiError("VALIDATION_ERROR", "Invalid properties payload.", 400, parsed.error.flatten());
+    }
+    const changes = parsed.data;
+    return success(
+      propertiesService.update(
+        id,
+        changes.values !== undefined ? { values: changes.values } : { raw: changes.raw! },
+      ),
+    );
   });
 }
