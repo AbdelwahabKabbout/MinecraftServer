@@ -15,7 +15,7 @@ This document describes the Minecraft Server Manager backend architecture. It is
 ### API layer (`backend/src/routes`, `server.ts`)
 
 - Fastify application factory with CORS (dev-only permissive), a registered WebSocket plugin, a global error handler and a uniform 404 handler.
-- The `/ws` endpoint hosts the broadcast hub for typed events: `server.status`, `server.console` (and later `server.metrics`).
+- The `/ws` endpoint hosts the broadcast hub for typed events: `server.status`, `server.console`, `server.consoleCleared` (and later `server.metrics`).
 - Response envelope:
 
   ```json
@@ -32,9 +32,9 @@ This document describes the Minecraft Server Manager backend architecture. It is
 ### Database (`backend/src/db`, `repositories/`)
 
 - SQLite via `better-sqlite3`, accessed through Drizzle ORM.
-- Schema is defined in `src/db/schema.ts`: `app_meta` (small key/value metadata) and `servers` (instance configuration only). Migrations are generated with Drizzle Kit into `backend/drizzle/` and applied on startup (and manually with `db:migrate`).
+- Schema is defined in `src/db/schema.ts`: `app_meta` (small key/value metadata), `servers` (instance configuration only) and `console_logs` (persisted console output per server). Migrations are generated with Drizzle Kit into `backend/drizzle/` and applied on startup (and manually with `db:migrate`).
 - The schema stores metadata only. Minecraft files (worlds, jars, properties) are never duplicated into tables.
-- `repositories/serverRepository.ts` is a thin data-access layer over Drizzle.
+- `repositories/serverRepository.ts` and `repositories/consoleRepository.ts` are thin data-access layers over Drizzle.
 
 ### Configuration (`backend/src/config`)
 
@@ -48,8 +48,16 @@ This document describes the Minecraft Server Manager backend architecture. It is
 - **Detection** (`minecraft/detection.ts`): read-only scan of an instance directory — preferred launcher jar (Fabric launcher before `server.jar`), `server.properties`, `eula.txt` acceptance, and structural directories (`mods/`, `config/`, `world/`, `logs/`, `crash-reports/`). Returns human-readable blocking issues.
 - **server.properties** (`minecraft/serverProperties.ts`): parse/update that round-trips comments, ordering and unknown keys.
 - **Process manager** (`minecraft/processManager.ts`): spawns `java -Xms.. -Xmx.. -jar <jar> nogui` in the server directory with explicit argument arrays, detects `Done (...)` for `ONLINE`, supports graceful stop with timeout + force-kill, restart, stdin commands, a bounded console buffer, and marks unexpected exits as `CRASHED`. The spawn function is injectable for tests.
-- **Service** (`services/serverService.ts`): normalizes/de-duplicates directories, generates unique slugs, prevents editing/deleting running instances, persists state changes and broadcasts `server.status`/`server.console` through the hub.
+- **Service** (`services/serverService.ts`): normalizes/de-duplicates directories, generates unique slugs, prevents editing/deleting running instances, persists state changes and broadcasts `server.status`/`server.console` through the hub, and forwards console output to the log service.
+- **Console log** (`services/consoleService.ts`, `repositories/consoleRepository.ts`): batches console lines into SQLite (flushed every 100ms) and prunes each server's history to the newest 2000 rows, so the console survives process restarts and reloads. `GET /api/servers/:id/console` reads history oldest-first (optional `limit`); `DELETE` clears it (history is also removed when the server is deleted).
 - **Path safety** (`utils/pathSafety.ts`): every instance directory is validated as a relative path under `serverRoot` — no traversal, no absolute paths, no drive segments.
+
+### Console frontend (`frontend/src/components/ConsolePanel.vue`)
+
+- Renders the timestamped log from the Pinia store, merged from `GET /console` history and live WS lines (deduplicated on `timestamp + line`).
+- Auto-scrolls to the bottom while following; pausing on scroll-up reveals a "Jump to bottom" button.
+- Command input with keyboard history (↑/↓), disabled while the server is stopped.
+- Line highlighting: `[manager]` markers, `ERROR`/`EXCEPTION` and `WARN` classes.
 
 ### Logging (`backend/src/config/logger`)
 
@@ -60,7 +68,6 @@ This document describes the Minecraft Server Manager backend architecture. It is
 
 | Component            | Responsibility                                                                 |
 | -------------------- | ------------------------------------------------------------------------------ |
-| `services/console`   | Live console UI + command input on top of the existing `/console` + WS stream  |
 | `minecraft/version`  | JAR/version probing and `server.properties` editing UI                         |
 | `monitoring/`        | CPU/RAM metrics, player join/leave detection, live `server.metrics` events     |
 | `modpacks/`          | Manifest model, validation (missing/unexpected/version/checksum), import/export |

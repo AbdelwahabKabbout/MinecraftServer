@@ -2,7 +2,7 @@
 
 A local-first web application for creating, controlling, monitoring and configuring Minecraft **Java Edition** server instances, with an architecture ready for modpack management and client-side modpack distribution.
 
-> **Status: Server management (Phase 2).** Instances can be registered against directories in `servers/`, detected (jar, EULA, structure), started/stopped/restarted through a safe Java process manager, and observed live over WebSocket. Live console UI, configuration editing, metrics, modpacks and networking are implemented in subsequent milestones.
+> **Status: Console milestone (Phase 3).** Instances can be registered against directories in `servers/`, detected (jar, EULA, structure), started/stopped/restarted through a safe Java process manager, and observed live over WebSocket — including a persistent console log with live streaming, autoscroll and command input. Configuration editing, metrics, modpacks and networking are implemented in subsequent milestones.
 
 ---
 
@@ -156,7 +156,17 @@ The **Server files** section of an instance runs a read-only check: preferred la
 - **Start** spawns `java` with `-Xms`/`-Xmx`, `-jar <detected jar> nogui`, in the server directory. State transitions `OFFLINE → STARTING → ONLINE`, where `ONLINE` is only marked when the server prints `Done (...)`. Dropped process → `CRASHED`.
 - **Stop** sends `stop` to stdin and waits `SHUTDOWN_TIMEOUT_MS` (default 15s) before force-killing.
 - **Restart** stops then starts again.
-- All state changes (and console lines) are broadcast live on the `/ws` hub as `server.status` / `server.console` events.
+- All state changes (and console lines) are broadcast live on the `/ws` hub as `server.status` / `server.console` / `server.consoleCleared` events.
+
+### Console
+
+Every instance has a persistent console log (captured stdout/stderr plus `[manager]`-prefixed annotations). Lines are persisted to SQLite in batches and pruned to the newest 2000 per server, so history survives restarts and page reloads.
+
+The **Console** panel on the server detail page shows the timestamped log with:
+- live streaming over WebSocket with an auto-scroll that pauses when you scroll up (with a "Jump to bottom" shortcut),
+- a command input with ⭡/⭣ history recall (commands work while the server is running),
+- highlighting for `[manager]` markers and `ERROR`/`WARN` lines,
+- a labelled **Clear** action (with confirm) that wipes both the stored history and the running buffer.
 
 ### API surface
 
@@ -171,7 +181,8 @@ The **Server files** section of an instance runs a read-only check: preferred la
 | POST | `/api/servers/:id/stop` | Graceful stop |
 | POST | `/api/servers/:id/restart` | Restart |
 | POST | `/api/servers/:id/command` | Send a server command via stdin |
-| GET | `/api/servers/:id/console` | Buffered console lines |
+| GET | `/api/servers/:id/console` | Stored console history (`?limit=n`, oldest-first) |
+| DELETE | `/api/servers/:id/console` | Clear stored console history (+ running buffer) |
 
 ## Documentation
 
@@ -180,9 +191,8 @@ The **Server files** section of an instance runs a read-only check: preferred la
 - [docs/modpack-system.md](docs/modpack-system.md) — modpack manifest format, validation and distribution plan
 - [docs/networking.md](docs/networking.md) — LAN-first networking and the `NetworkProvider` abstraction
 
-## Known limitations (Phase 2)
+## Known limitations (Phase 3)
 
-- Live console UI and command input arrive with the console milestone (the backend already streams `server.console` events and exposes `/console`)
 - `server.properties` editing UI is not built yet (the parser/writer exists and round-trips unknown keys)
 - Metrics (CPU/RAM, player join/leave) arrive with the monitoring milestone
 - Modpack definitions and validation are **not yet implemented**
@@ -191,7 +201,7 @@ The **Server files** section of an instance runs a read-only check: preferred la
 ## Roadmap
 
 1. ✅ **Server management** — instance CRUD, directory detection, process manager (start/stop/restart, safe spawning)
-2. **Console** — live console UI (stdout/stderr streams already flow over WebSocket), command input
+2. ✅ **Console** — persistent console log, live WebSocket streaming, autoscroll, highlighting, command input with history
 3. **Configuration** — `server.properties` editing UI on top of the parser/writer
 4. **Monitoring** — CPU/RAM metrics, player join/leave detection, live WebSocket updates
 5. **Modpacks** — manifests, import/export, checksum validation
