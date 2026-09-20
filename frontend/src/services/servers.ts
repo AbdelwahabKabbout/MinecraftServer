@@ -57,6 +57,11 @@ export interface DetectionReport {
   blockingMissing: string[];
 }
 
+export interface ConsoleLine {
+  line: string;
+  timestamp: number;
+}
+
 export const serverService = {
   list(): Promise<ManagedServer[]> {
     return apiGet<ManagedServer[]>("/servers");
@@ -91,8 +96,12 @@ export const serverService = {
   command(id: string, command: string): Promise<{ id: string; sent: boolean }> {
     return apiPost<{ id: string; sent: boolean }>(`/servers/${id}/command`, { command });
   },
-  console(id: string): Promise<{ lines: string[] }> {
-    return apiGet<{ lines: string[] }>(`/servers/${id}/console`);
+  consoleHistory(id: string, limit?: number): Promise<{ lines: ConsoleLine[] }> {
+    const query = limit ? `?limit=${limit}` : "";
+    return apiGet<{ lines: ConsoleLine[] }>(`/servers/${id}/console${query}`);
+  },
+  clearConsole(id: string): Promise<{ id: string; cleared: boolean; removed: number }> {
+    return apiDelete<{ id: string; cleared: boolean; removed: number }>(`/servers/${id}/console`);
   },
 };
 

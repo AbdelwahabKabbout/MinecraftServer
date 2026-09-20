@@ -6,18 +6,21 @@ import {
   type ServerUpdatePayload,
   type DetectionReport,
   type ServerStatus,
+  type ConsoleLine,
 } from "@/services/servers";
 import { WsClient, type HubEvent } from "@/services/websocket";
 import { ApiClientError } from "@/services/api";
 
 const liveClient = new WsClient();
 
+const MAX_CONSOLE_LINES = 2000;
+
 interface ServerViewState {
   servers: ManagedServer[];
   loading: boolean;
   error: string | null;
   detections: Record<string, DetectionReport>;
-  consoleLines: Record<string, string[]>;
+  consoleLines: Record<string, ConsoleLine[]>;
   live: boolean;
   connectedOnce: boolean;
 }
@@ -36,6 +39,7 @@ export const useServersStore = defineStore("servers", {
   getters: {
     byId: (state) => (id: string): ManagedServer | undefined =>
       state.servers.find((s) => s.id === id),
+    consoleById: (state) => (id: string): ConsoleLine[] => state.consoleLines[id] ?? [],
     count: (state): number => state.servers.length,
     runningCount: (state): number =>
       state.servers.filter((s) => s.status === "STARTING" || s.status === "ONLINE" || s.status === "STOPPING").length,
@@ -108,6 +112,47 @@ export const useServersStore = defineStore("servers", {
       }
     },
 
+    async hydrateConsole(id: string, limit = 500): Promise<void> {
+      try {
+        const { lines } = await serverService.consoleHistory(id, limit);
+        const existing = this.consoleLines[id] ?? [];
+        const seen = new Set<string>();
+        const merged = [...lines, ...existing]
+          .filter((entry) => {
+            const key = `${entry.timestamp}:${entry.line}`;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          })
+          .sort((a, b) => a.timestamp - b.timestamp)
+          .slice(-MAX_CONSOLE_LINES);
+        this.consoleLines[id] = merged;
+      } catch (error) {
+        this.error = this.messageFor(error);
+      }
+    },
+
+    async clearConsole(id: string): Promise<boolean> {
+      try {
+        const result = await serverService.clearConsole(id);
+        if (result.cleared) this.consoleLines[id] = [];
+        return result.cleared;
+      } catch (error) {
+        this.error = this.messageFor(error);
+        return false;
+      }
+    },
+
+    async sendCommand(id: string, command: string): Promise<boolean> {
+      try {
+        await serverService.command(id, command);
+        return true;
+      } catch (error) {
+        this.error = this.messageFor(error);
+        return false;
+      }
+    },
+
     async start(id: string): Promise<string | null> {
       return this.lifecycle(id, (sid) => serverService.start(sid));
     },
@@ -141,8 +186,10 @@ export const useServersStore = defineStore("servers", {
           if (server) server.status = event.status as ServerStatus;
         } else if (event.type === "server.console") {
           const lines = this.consoleLines[event.serverId] ?? [];
-          lines.push(`${new Date(event.timestamp).toLocaleTimeString()}  ${event.line}`);
-          this.consoleLines[event.serverId] = lines.slice(-1000);
+          lines.push({ line: event.line, timestamp: event.timestamp });
+          this.consoleLines[event.serverId] = lines.slice(-MAX_CONSOLE_LINES);
+        } else if (event.type === "server.consoleCleared") {
+          this.consoleLines[event.serverId] = [];
         }
       });
       liveClient.connect();

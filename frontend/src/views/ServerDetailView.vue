@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import StatusPill, { type PillStatus } from "@/components/StatusPill.vue";
 import EmptyState from "@/components/EmptyState.vue";
+import ConsolePanel from "@/components/ConsolePanel.vue";
 import { useServersStore } from "@/stores/servers";
 import type { DetectionReport, ManagedServer, ServerStatus } from "@/services/servers";
 
@@ -190,6 +191,6 @@ function blockerList(report: DetectionReport): string[] {
       <p v-else class="mt-4 text-sm text-slate-400">Running detection…</p>
     </section>
 
-    <p class="text-center text-xs text-slate-600">Live console and configuration editing arrive in a later milestone.</p>
+    <ConsolePanel v-if="server" :server-id="server.id" :running="running" />
   </div>
 </template>

@@ -11,12 +11,17 @@ export interface ServerConsoleEvent {
   timestamp: number;
 }
 
+export interface ServerConsoleClearedEvent {
+  type: "server.consoleCleared";
+  serverId: string;
+}
+
 export interface HubHelloEvent {
   type: "hub.hello";
   uptimeSeconds: number;
 }
 
-export type HubEvent = ServerStatusEvent | ServerConsoleEvent | HubHelloEvent;
+export type HubEvent = ServerStatusEvent | ServerConsoleEvent | ServerConsoleClearedEvent | HubHelloEvent;
 
 type Handler = (event?: HubEvent) => void;
 
