@@ -2,7 +2,7 @@
 
 A local-first web application for creating, controlling, monitoring and configuring Minecraft **Java Edition** server instances, with an architecture ready for modpack management and client-side modpack distribution.
 
-> **Status: Configuration milestone (Phase 4).** Instances can be registered against directories in `servers/`, detected (jar, EULA, structure), started/stopped/restarted through a safe Java process manager, observed live (persistent console + command input), and configured through a `server.properties` editor that preserves comments, ordering and unknown keys. Metrics, modpacks and networking are implemented in subsequent milestones.
+> **Status: Monitoring milestone (Phase 5).** Instances can be registered against directories in `servers/`, detected (jar, EULA, structure), started/stopped/restarted through a safe Java process manager, observed live (persistent console + command input), configured through a `server.properties` editor that preserves comments, ordering and unknown keys, and monitored live (CPU/RAM sampled every 5 s, uptime/PID, online players with join/leave feed — all over WebSocket). Modpacks and networking are implemented in subsequent milestones.
 
 ---
 
@@ -178,6 +178,15 @@ The **Server properties** panel edits the instance's `server.properties` file wi
 - Unknown/forward-looking keys are safe: they round-trip unchanged.
 - Missing file → the editor offers to create one on save.
 
+### Monitoring
+
+While a server is running, the manager samples the Java process every 5 seconds and streams it to the dashboard:
+
+- **CPU %** and **resident RAM** (working-set / RSS, platform-native readers: Linux `/proc/<pid>` and Windows `Get-Process`). The first sample shows RAM only; CPU% appears from the second sample (elapsed-time based). History (last ~12 minutes) is held per server and exposed over REST.
+- **Uptime and PID** of the live process.
+- **Online players**: join/leave is detected by parsing console output (`X joined the game` / `X left the game`). The player list and a timestamped activity feed update live; the current list is also served over REST.
+- Live values arrive over `/ws` as `server.metrics` and `server.playerActivity` events; they stop/reset when the server stops.
+
 ### API surface
 
 | Method | Endpoint | Purpose |
@@ -195,6 +204,8 @@ The **Server properties** panel edits the instance's `server.properties` file wi
 | DELETE | `/api/servers/:id/console` | Clear stored console history (+ running buffer) |
 | GET | `/api/servers/:id/properties` | Read `server.properties` (path, raw text, pairs) |
 | PUT | `/api/servers/:id/properties` | Patch values (`{values}`) or write raw text (`{raw}`) |
+| GET | `/api/servers/:id/metrics` | Latest sample + short history (CPU%, RAM) for a running server |
+| GET | `/api/servers/:id/players` | Online player list + join/leave activity feed |
 
 ## Documentation
 
@@ -203,9 +214,10 @@ The **Server properties** panel edits the instance's `server.properties` file wi
 - [docs/modpack-system.md](docs/modpack-system.md) — modpack manifest format, validation and distribution plan
 - [docs/networking.md](docs/networking.md) — LAN-first networking and the `NetworkProvider` abstraction
 
-## Known limitations (Phase 4)
+## Known limitations (Phase 5)
 
-- Metrics (CPU/RAM, player join/leave) arrive with the monitoring milestone
+- CPU/RAM sampling is implemented for Linux (`/proc`) and Windows (`Get-Process`); on other platforms metrics are simply not collected. CPU% needs two samples (≈5 s) to appear.
+- Player join/leave detection relies on standard console lines (`joined the game` / `left the game`); servers that suppress or rename those lines will not update the list (RCON-based probing is a possible follow-up).
 - Modpack definitions and validation are **not yet implemented**
 - No authentication: the manager binds locally / on your LAN by default. Do not expose it directly to the public internet.
 
@@ -214,7 +226,7 @@ The **Server properties** panel edits the instance's `server.properties` file wi
 1. ✅ **Server management** — instance CRUD, directory detection, process manager (start/stop/restart, safe spawning)
 2. ✅ **Console** — persistent console log, live WebSocket streaming, autoscroll, highlighting, command input with history
 3. ✅ **Configuration** — `server.properties` editor (structured form + raw mode) on top of the round-tripping parser
-4. **Monitoring** — CPU/RAM metrics, player join/leave detection, live WebSocket updates
+4. ✅ **Monitoring** — CPU/RAM sampling, uptime/PID, online players with a join/leave feed, live WebSocket updates
 5. **Modpacks** — manifests, import/export, checksum validation
 6. **Networking** — LAN connection info, `NetworkProvider` abstraction
 7. **Client distribution** — a companion launcher that reads manifests, verifies `sha256` and launches Minecraft

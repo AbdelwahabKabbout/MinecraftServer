@@ -1,6 +1,6 @@
 # Architecture
 
-This document describes the Minecraft Server Manager backend architecture. It is intentionally written as the foundation for later milestones: process management, the live console, `server.properties` editing, monitoring and modpacks slot into the interfaces defined here.
+This document describes the Minecraft Server Manager backend architecture. The live console, `server.properties` editing and monitoring are built on it; modpacks and networking slot into the interfaces defined here.
 
 ## Principles
 
@@ -15,7 +15,7 @@ This document describes the Minecraft Server Manager backend architecture. It is
 ### API layer (`backend/src/routes`, `server.ts`)
 
 - Fastify application factory with CORS (dev-only permissive), a registered WebSocket plugin, a global error handler and a uniform 404 handler.
-- The `/ws` endpoint hosts the broadcast hub for typed events: `server.status`, `server.console`, `server.consoleCleared` (and later `server.metrics`).
+- The `/ws` endpoint hosts the broadcast hub for typed events: `server.status`, `server.console`, `server.consoleCleared`, `server.metrics` (periodic samples) and `server.playerActivity`.
 - Response envelope:
 
   ```json
@@ -27,7 +27,7 @@ This document describes the Minecraft Server Manager backend architecture. It is
   ```
 
 - All manager endpoints are mounted under `/api`. The bare `/` and `/api` routes advertise the API.
-- Server routes (`routes/servers.ts`) cover CRUD, status, detection, start/stop/restart, command, console (GET history/DELETE clear) and properties (GET/PUT).
+- Server routes (`routes/servers.ts`) cover CRUD, status, detection, start/stop/restart, command, console (GET history/DELETE clear), properties (GET/PUT), metrics (GET) and players (GET).
 - Property patches are validated with Zod (well-formed keys, newline-free values, exactly one of `values`/`raw`). Raw-save rejects malformed documents with a line-level `details` array.
 
 ### Database (`backend/src/db`, `repositories/`)
@@ -52,6 +52,7 @@ This document describes the Minecraft Server Manager backend architecture. It is
 - **Service** (`services/serverService.ts`): normalizes/de-duplicates directories, generates unique slugs, prevents editing/deleting running instances, persists state changes and broadcasts `server.status`/`server.console` through the hub, and forwards console output to the log service.
 - **Console log** (`services/consoleService.ts`, `repositories/consoleRepository.ts`): batches console lines into SQLite (flushed every 100ms) and prunes each server's history to the newest 2000 rows, so the console survives process restarts and reloads. `GET /api/servers/:id/console` reads history oldest-first (optional `limit`); `DELETE` clears it (history is also removed when the server is deleted).
 - **Properties service** (`services/propertiesService.ts`): reads `server.properties` and applies single-key patches (`setProperty`/`removeProperty`) to the on-disk text so comments, ordering and unknown keys survive. Missing files are created with a header on save; missing directories are rejected (`SERVER_DIRECTORY_MISSING`).
+- **Monitoring** (`monitoring/metricsService.ts`, `monitoring/processMetrics.ts`): a per-server sampler runs every 5 s while the process is up. It reads CPU time + resident memory with platform-native readers (Linux `/proc/<pid>/stat` + `/proc/<pid>/status`, Windows `Get-Process`; other platforms gracefully skip). CPU% is elapsed-time-based (percent appears from the second sample); RAM is reported in MB. The newest ~144 samples (~12 min) are kept and exposed via `GET /:id/metrics`. Join/leave is parsed from console lines (`X joined the game` / `X left the game`), maintaining an online list and a bounded activity feed (`GET /:id/players`). The `started` process event provides pid/startedAt; the sampler deregisters on `CRASHED`/`OFFLINE`. Samples and player changes go out over the hub as `server.metrics` / `server.playerActivity`.
 - **Path safety** (`utils/pathSafety.ts`): every instance directory is validated as a relative path under `serverRoot` — no traversal, no absolute paths, no drive segments.
 
 ### Server properties frontend (`frontend/src/components/PropertiesPanel.vue`)
@@ -72,12 +73,17 @@ This document describes the Minecraft Server Manager backend architecture. It is
 - Pino with pretty output in development. Application lifecycle events are logged here.
 - Minecraft console output is captured by the process manager, buffered per instance, and streamed over WebSocket.
 
+### Monitoring frontend (`frontend/src/components/MetricsPanel.vue`)
+
+- Seeded once from `GET /:id/metrics` and `GET /:id/players`, then kept fresh by the live `server.metrics` / `server.playerActivity` events in the Pinia store.
+- CPU% and RAM tiles with thin progress bars, uptime, PID and last-sample time.
+- Online players as chips plus a timestamped join/leave activity feed. Stopping the server resets the snapshot and empties the player list.
+
 ## Planned components (later milestones)
 
 | Component            | Responsibility                                                                 |
 | -------------------- | ------------------------------------------------------------------------------ |
 | `minecraft/version`  | Version probing / server JAR download                                          |
-| `monitoring/`        | CPU/RAM metrics, player join/leave detection, live `server.metrics` events     |
 | `modpacks/`          | Manifest model, validation (missing/unexpected/version/checksum), import/export |
 | `networking/`        | `NetworkProvider` interface with a `LocalNetworkProvider` implementation        |
 
