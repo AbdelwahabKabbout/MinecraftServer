@@ -4,6 +4,7 @@ import { useRoute, useRouter } from "vue-router";
 import StatusPill, { type PillStatus } from "@/components/StatusPill.vue";
 import EmptyState from "@/components/EmptyState.vue";
 import ConsolePanel from "@/components/ConsolePanel.vue";
+import PropertiesPanel from "@/components/PropertiesPanel.vue";
 import { useServersStore } from "@/stores/servers";
 import type { DetectionReport, ManagedServer, ServerStatus } from "@/services/servers";
 
@@ -184,12 +185,14 @@ function blockerList(report: DetectionReport): string[] {
           </div>
         </dl>
 
-        <p v-if="detection.notes.length > 0" class="mt-4 border-t border-surface-700 pt-3 text-xs text-slate-500">
+<p v-if="detection.notes.length > 0" class="mt-4 border-t border-surface-700 pt-3 text-xs text-slate-500">
           {{ detection.notes.join(" ") }}
         </p>
       </template>
       <p v-else class="mt-4 text-sm text-slate-400">Running detection…</p>
     </section>
+
+    <PropertiesPanel v-if="server" :server-id="server.id" />
 
     <ConsolePanel v-if="server" :server-id="server.id" :running="running" />
   </div>

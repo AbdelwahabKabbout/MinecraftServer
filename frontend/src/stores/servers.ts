@@ -7,6 +7,8 @@ import {
   type DetectionReport,
   type ServerStatus,
   type ConsoleLine,
+  type ServerPropertiesDoc,
+  type ServerPropertiesPatch,
 } from "@/services/servers";
 import { WsClient, type HubEvent } from "@/services/websocket";
 import { ApiClientError } from "@/services/api";
@@ -21,6 +23,7 @@ interface ServerViewState {
   error: string | null;
   detections: Record<string, DetectionReport>;
   consoleLines: Record<string, ConsoleLine[]>;
+  properties: Record<string, ServerPropertiesDoc>;
   live: boolean;
   connectedOnce: boolean;
 }
@@ -32,6 +35,7 @@ export const useServersStore = defineStore("servers", {
     error: null,
     detections: {},
     consoleLines: {},
+    properties: {},
     live: false,
     connectedOnce: false,
   }),
@@ -150,6 +154,27 @@ export const useServersStore = defineStore("servers", {
       } catch (error) {
         this.error = this.messageFor(error);
         return false;
+      }
+    },
+
+    async fetchProperties(id: string): Promise<ServerPropertiesDoc | null> {
+      try {
+        const doc = await serverService.properties(id);
+        this.properties[id] = doc;
+        return doc;
+      } catch (error) {
+        this.error = this.messageFor(error);
+        return null;
+      }
+    },
+
+    async saveProperties(id: string, payload: ServerPropertiesPatch): Promise<ServerPropertiesDoc | null> {
+      try {
+        const doc = await serverService.saveProperties(id, payload);
+        this.properties[id] = doc;
+        return doc;
+      } catch (error) {
+        throw this.asError(error);
       }
     },
 

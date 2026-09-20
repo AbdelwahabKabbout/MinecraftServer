@@ -62,6 +62,18 @@ export interface ConsoleLine {
   timestamp: number;
 }
 
+export interface ServerPropertiesDoc {
+  path: string;
+  exists: boolean;
+  text: string | null;
+  pairs: Array<{ key: string; value: string }>;
+}
+
+export interface ServerPropertiesPatch {
+  values?: Record<string, string | null>;
+  raw?: string;
+}
+
 export const serverService = {
   list(): Promise<ManagedServer[]> {
     return apiGet<ManagedServer[]>("/servers");
@@ -102,6 +114,12 @@ export const serverService = {
   },
   clearConsole(id: string): Promise<{ id: string; cleared: boolean; removed: number }> {
     return apiDelete<{ id: string; cleared: boolean; removed: number }>(`/servers/${id}/console`);
+  },
+  properties(id: string): Promise<ServerPropertiesDoc> {
+    return apiGet<ServerPropertiesDoc>(`/servers/${id}/properties`);
+  },
+  saveProperties(id: string, payload: ServerPropertiesPatch): Promise<ServerPropertiesDoc> {
+    return apiPut<ServerPropertiesDoc>(`/servers/${id}/properties`, payload);
   },
 };
 
