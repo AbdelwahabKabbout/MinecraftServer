@@ -14,7 +14,8 @@ This document describes the Minecraft Server Manager backend architecture. It is
 
 ### API layer (`backend/src/routes`, `server.ts`)
 
-- Fastify application factory with CORS (dev-only permissive), a registered WebSocket plugin (reserved for live console/status/metrics), a global error handler and a uniform 404 handler.
+- Fastify application factory with CORS (dev-only permissive), a registered WebSocket plugin, a global error handler and a uniform 404 handler.
+- The `/ws` endpoint hosts the broadcast hub for typed events: `server.status`, `server.console` (and later `server.metrics`).
 - Response envelope:
 
   ```json
@@ -26,33 +27,44 @@ This document describes the Minecraft Server Manager backend architecture. It is
   ```
 
 - All manager endpoints are mounted under `/api`. The bare `/` and `/api` routes advertise the API.
+- Server routes (`routes/servers.ts`) cover CRUD, status, detection, start/stop/restart, command and console.
 
-### Database (`backend/src/db`)
+### Database (`backend/src/db`, `repositories/`)
 
 - SQLite via `better-sqlite3`, accessed through Drizzle ORM.
-- Schema is defined in `src/db/schema.ts`. Migrations are generated with Drizzle Kit (`npm run db:generate`) into `backend/drizzle/` and applied on startup (and manually with `db:migrate`).
-- The schema is deliberately minimal. Files that belong to Minecraft (worlds, jars, properties) are not duplicated into tables.
+- Schema is defined in `src/db/schema.ts`: `app_meta` (small key/value metadata) and `servers` (instance configuration only). Migrations are generated with Drizzle Kit into `backend/drizzle/` and applied on startup (and manually with `db:migrate`).
+- The schema stores metadata only. Minecraft files (worlds, jars, properties) are never duplicated into tables.
+- `repositories/serverRepository.ts` is a thin data-access layer over Drizzle.
 
 ### Configuration (`backend/src/config`)
 
 - `.env` is parsed and validated with Zod. Unknown/malformed values fail fast with a readable message.
 - `paths.serverRoot` (default `./servers`) is the root for all server instance directories and must contain only server data.
+- `SHUTDOWN_TIMEOUT_MS` controls the graceful-stop window before a force-kill.
+
+### Server management core (`backend/src/minecraft`, `services/`)
+
+- **State machine** (`minecraft/serverState.ts`): `OFFLINE → STARTING→ ONLINE`, with `STOPPING` and `CRASHED`; every transition is validated.
+- **Detection** (`minecraft/detection.ts`): read-only scan of an instance directory — preferred launcher jar (Fabric launcher before `server.jar`), `server.properties`, `eula.txt` acceptance, and structural directories (`mods/`, `config/`, `world/`, `logs/`, `crash-reports/`). Returns human-readable blocking issues.
+- **server.properties** (`minecraft/serverProperties.ts`): parse/update that round-trips comments, ordering and unknown keys.
+- **Process manager** (`minecraft/processManager.ts`): spawns `java -Xms.. -Xmx.. -jar <jar> nogui` in the server directory with explicit argument arrays, detects `Done (...)` for `ONLINE`, supports graceful stop with timeout + force-kill, restart, stdin commands, a bounded console buffer, and marks unexpected exits as `CRASHED`. The spawn function is injectable for tests.
+- **Service** (`services/serverService.ts`): normalizes/de-duplicates directories, generates unique slugs, prevents editing/deleting running instances, persists state changes and broadcasts `server.status`/`server.console` through the hub.
+- **Path safety** (`utils/pathSafety.ts`): every instance directory is validated as a relative path under `serverRoot` — no traversal, no absolute paths, no drive segments.
 
 ### Logging (`backend/src/config/logger`)
 
 - Pino with pretty output in development. Application lifecycle events are logged here.
-- Minecraft console output is handled separately by the process manager and streamed over WebSocket (see roadmap).
+- Minecraft console output is captured by the process manager, buffered per instance, and streamed over WebSocket.
 
 ## Planned components (later milestones)
 
 | Component            | Responsibility                                                                 |
 | -------------------- | ------------------------------------------------------------------------------ |
-| `services/process`   | Launch/stop/restart Java, `stop` command + graceful timeout, exit-surprise detection (`CRASHED`) |
-| `minecraft/`         | Loader abstraction (Fabric first), server.jar/version probing, console parser  |
-| `minecraft/properties` | `server.properties` parse/write preserving unknown keys                       |
+| `services/console`   | Live console UI + command input on top of the existing `/console` + WS stream  |
+| `minecraft/version`  | JAR/version probing and `server.properties` editing UI                         |
+| `monitoring/`        | CPU/RAM metrics, player join/leave detection, live `server.metrics` events     |
 | `modpacks/`          | Manifest model, validation (missing/unexpected/version/checksum), import/export |
 | `networking/`        | `NetworkProvider` interface with a `LocalNetworkProvider` implementation        |
-| `websocket/`         | Typed event bus: `server.status`, `server.console`, `server.metrics`, player events |
 
 ## Process safety rules
 

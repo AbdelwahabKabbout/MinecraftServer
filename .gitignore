@@ -24,6 +24,7 @@ npm-debug.log*
 
 # Backend runtime data (SQLite, uploaded artifacts)
 backend/data/
+data/
 
 # Server runtime directories (Minecraft runs here, not in VCS)
 servers/*
