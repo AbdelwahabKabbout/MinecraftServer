@@ -4,7 +4,9 @@ import dotenv from "dotenv";
 import { z } from "zod";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const projectRoot = path.resolve(__dirname, "..", "..");
+// Backend source lives at <repo>/backend/src/config (dev) or <repo>/backend/dist/config (built),
+// so three levels up from the config module is always the repository root.
+const projectRoot = path.resolve(__dirname, "..", "..", "..");
 
 // Load .env from the repository root. Tests set process.env directly before
 // importing this module, which takes precedence over the file values.
@@ -20,6 +22,7 @@ const envSchema = z.object({
   MEMORY_MIN_MB: z.coerce.number().int().positive().default(1024),
   MEMORY_MAX_MB: z.coerce.number().int().positive().default(2048),
   METRICS_INTERVAL_MS: z.coerce.number().int().positive().default(3000),
+  SHUTDOWN_TIMEOUT_MS: z.coerce.number().int().positive().default(15000),
 });
 
 const parsed = envSchema.safeParse(process.env);

@@ -5,7 +5,9 @@ import websocket from "@fastify/websocket";
 import { env } from "./config/index.js";
 import { logger } from "./config/logger.js";
 import { healthRoutes } from "./routes/health.js";
+import { serverRoutes } from "./routes/servers.js";
 import { buildErrorHandler } from "./routes/errorHandler.js";
+import { wsHub } from "./websocket/hub.js";
 
 export async function buildApp(options: { logger?: boolean } = {}): Promise<FastifyInstance> {
   const app = Fastify({
@@ -18,9 +20,13 @@ export async function buildApp(options: { logger?: boolean } = {}): Promise<Fast
     origin: env.NODE_ENV === "development" ? true : false,
   });
 
-  // WebSocket support is registered now so later phases (live console,
-  // status/metrics broadcasts) can add `app.get("/ws/...", { websocket: true })`.
   await app.register(websocket, { options: { maxPayload: 1024 * 1024 } });
+
+  app.get("/ws", { websocket: true }, (connection) => {
+    wsHub.add(connection);
+    connection.on("close", () => wsHub.remove(connection));
+    connection.on("error", () => wsHub.remove(connection));
+  });
 
   app.setErrorHandler(buildErrorHandler());
 
@@ -33,6 +39,7 @@ export async function buildApp(options: { logger?: boolean } = {}): Promise<Fast
   });
 
   await app.register(healthRoutes);
+  await app.register(serverRoutes);
 
   app.addHook("onClose", async () => {
     logger.info("Shutting down API server");
