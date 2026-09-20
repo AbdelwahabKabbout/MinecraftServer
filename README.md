@@ -2,7 +2,7 @@
 
 A local-first web application for creating, controlling, monitoring and configuring Minecraft **Java Edition** server instances, with an architecture ready for modpack management and client-side modpack distribution.
 
-> **Status: Console milestone (Phase 3).** Instances can be registered against directories in `servers/`, detected (jar, EULA, structure), started/stopped/restarted through a safe Java process manager, and observed live over WebSocket — including a persistent console log with live streaming, autoscroll and command input. Configuration editing, metrics, modpacks and networking are implemented in subsequent milestones.
+> **Status: Configuration milestone (Phase 4).** Instances can be registered against directories in `servers/`, detected (jar, EULA, structure), started/stopped/restarted through a safe Java process manager, observed live (persistent console + command input), and configured through a `server.properties` editor that preserves comments, ordering and unknown keys. Metrics, modpacks and networking are implemented in subsequent milestones.
 
 ---
 
@@ -168,6 +168,16 @@ The **Console** panel on the server detail page shows the timestamped log with:
 - highlighting for `[manager]` markers and `ERROR`/`WARN` lines,
 - a labelled **Clear** action (with confirm) that wipes both the stored history and the running buffer.
 
+### Server properties
+
+The **Server properties** panel edits the instance's `server.properties` file without clobbering anything else:
+
+- **Common** tab: a form for the settings you touch most often (MOTD, port, difficulty, gamemode, player limits, whitelist/online-mode/pvp and other toggles, RCON...).
+- **Raw** tab: the full document, comments included. Lines are validated on save (`key=value` format, lowercase dotted/hyphenated keys); problems come back with a line-level report.
+- Structured saves are single-key patches — comments, ordering and keys the form does not model are preserved exactly. Empty fields are removed so Minecraft's built-in defaults apply; a `null` value deletes a key.
+- Unknown/forward-looking keys are safe: they round-trip unchanged.
+- Missing file → the editor offers to create one on save.
+
 ### API surface
 
 | Method | Endpoint | Purpose |
@@ -183,6 +193,8 @@ The **Console** panel on the server detail page shows the timestamped log with:
 | POST | `/api/servers/:id/command` | Send a server command via stdin |
 | GET | `/api/servers/:id/console` | Stored console history (`?limit=n`, oldest-first) |
 | DELETE | `/api/servers/:id/console` | Clear stored console history (+ running buffer) |
+| GET | `/api/servers/:id/properties` | Read `server.properties` (path, raw text, pairs) |
+| PUT | `/api/servers/:id/properties` | Patch values (`{values}`) or write raw text (`{raw}`) |
 
 ## Documentation
 
@@ -191,9 +203,8 @@ The **Console** panel on the server detail page shows the timestamped log with:
 - [docs/modpack-system.md](docs/modpack-system.md) — modpack manifest format, validation and distribution plan
 - [docs/networking.md](docs/networking.md) — LAN-first networking and the `NetworkProvider` abstraction
 
-## Known limitations (Phase 3)
+## Known limitations (Phase 4)
 
-- `server.properties` editing UI is not built yet (the parser/writer exists and round-trips unknown keys)
 - Metrics (CPU/RAM, player join/leave) arrive with the monitoring milestone
 - Modpack definitions and validation are **not yet implemented**
 - No authentication: the manager binds locally / on your LAN by default. Do not expose it directly to the public internet.
@@ -202,7 +213,7 @@ The **Console** panel on the server detail page shows the timestamped log with:
 
 1. ✅ **Server management** — instance CRUD, directory detection, process manager (start/stop/restart, safe spawning)
 2. ✅ **Console** — persistent console log, live WebSocket streaming, autoscroll, highlighting, command input with history
-3. **Configuration** — `server.properties` editing UI on top of the parser/writer
+3. ✅ **Configuration** — `server.properties` editor (structured form + raw mode) on top of the round-tripping parser
 4. **Monitoring** — CPU/RAM metrics, player join/leave detection, live WebSocket updates
 5. **Modpacks** — manifests, import/export, checksum validation
 6. **Networking** — LAN connection info, `NetworkProvider` abstraction

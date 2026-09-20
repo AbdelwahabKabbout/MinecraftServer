@@ -1,6 +1,6 @@
 # Architecture
 
-This document describes the Minecraft Server Manager backend architecture. It is intentionally written as the foundation for later milestones: process management, live console, monitoring and modpacks will slot into the interfaces defined here.
+This document describes the Minecraft Server Manager backend architecture. It is intentionally written as the foundation for later milestones: process management, the live console, `server.properties` editing, monitoring and modpacks slot into the interfaces defined here.
 
 ## Principles
 
@@ -27,7 +27,8 @@ This document describes the Minecraft Server Manager backend architecture. It is
   ```
 
 - All manager endpoints are mounted under `/api`. The bare `/` and `/api` routes advertise the API.
-- Server routes (`routes/servers.ts`) cover CRUD, status, detection, start/stop/restart, command and console.
+- Server routes (`routes/servers.ts`) cover CRUD, status, detection, start/stop/restart, command, console (GET history/DELETE clear) and properties (GET/PUT).
+- Property patches are validated with Zod (well-formed keys, newline-free values, exactly one of `values`/`raw`). Raw-save rejects malformed documents with a line-level `details` array.
 
 ### Database (`backend/src/db`, `repositories/`)
 
@@ -46,11 +47,18 @@ This document describes the Minecraft Server Manager backend architecture. It is
 
 - **State machine** (`minecraft/serverState.ts`): `OFFLINE → STARTING→ ONLINE`, with `STOPPING` and `CRASHED`; every transition is validated.
 - **Detection** (`minecraft/detection.ts`): read-only scan of an instance directory — preferred launcher jar (Fabric launcher before `server.jar`), `server.properties`, `eula.txt` acceptance, and structural directories (`mods/`, `config/`, `world/`, `logs/`, `crash-reports/`). Returns human-readable blocking issues.
-- **server.properties** (`minecraft/serverProperties.ts`): parse/update that round-trips comments, ordering and unknown keys.
+- **server.properties** (`minecraft/serverProperties.ts`): parse/update that round-trips comments, ordering and unknown keys. Also removes keys and line-validates whole documents (`key=value` format, `[a-z0-9._-]` keys).
 - **Process manager** (`minecraft/processManager.ts`): spawns `java -Xms.. -Xmx.. -jar <jar> nogui` in the server directory with explicit argument arrays, detects `Done (...)` for `ONLINE`, supports graceful stop with timeout + force-kill, restart, stdin commands, a bounded console buffer, and marks unexpected exits as `CRASHED`. The spawn function is injectable for tests.
 - **Service** (`services/serverService.ts`): normalizes/de-duplicates directories, generates unique slugs, prevents editing/deleting running instances, persists state changes and broadcasts `server.status`/`server.console` through the hub, and forwards console output to the log service.
 - **Console log** (`services/consoleService.ts`, `repositories/consoleRepository.ts`): batches console lines into SQLite (flushed every 100ms) and prunes each server's history to the newest 2000 rows, so the console survives process restarts and reloads. `GET /api/servers/:id/console` reads history oldest-first (optional `limit`); `DELETE` clears it (history is also removed when the server is deleted).
+- **Properties service** (`services/propertiesService.ts`): reads `server.properties` and applies single-key patches (`setProperty`/`removeProperty`) to the on-disk text so comments, ordering and unknown keys survive. Missing files are created with a header on save; missing directories are rejected (`SERVER_DIRECTORY_MISSING`).
 - **Path safety** (`utils/pathSafety.ts`): every instance directory is validated as a relative path under `serverRoot` — no traversal, no absolute paths, no drive segments.
+
+### Server properties frontend (`frontend/src/components/PropertiesPanel.vue`)
+
+- **Common** tab: a curated form (MOTD, port, difficulty, gamemode, player/tick limits, flags like whitelist/online-mode/pvp/RCON) whose fields map to `server.properties` keys; empty fields are sent as `null` → key removed → Minecraft default applies.
+- **Raw** tab: full document editor (comments preserved); saves verbatim after line validation.
+- Reload-from-disk discards local edits; a warning strip appears when the file does not exist yet (save creates it). Saved writes also refresh the parent's detection report.
 
 ### Console frontend (`frontend/src/components/ConsolePanel.vue`)
 
@@ -68,7 +76,7 @@ This document describes the Minecraft Server Manager backend architecture. It is
 
 | Component            | Responsibility                                                                 |
 | -------------------- | ------------------------------------------------------------------------------ |
-| `minecraft/version`  | JAR/version probing and `server.properties` editing UI                         |
+| `minecraft/version`  | Version probing / server JAR download                                          |
 | `monitoring/`        | CPU/RAM metrics, player join/leave detection, live `server.metrics` events     |
 | `modpacks/`          | Manifest model, validation (missing/unexpected/version/checksum), import/export |
 | `networking/`        | `NetworkProvider` interface with a `LocalNetworkProvider` implementation        |
