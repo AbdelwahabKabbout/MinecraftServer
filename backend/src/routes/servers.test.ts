@@ -392,3 +392,26 @@ describe("/api/servers properties", () => {
     expect(res.json().error.code).toBe("SERVER_DIRECTORY_MISSING");
   });
 });
+
+describe("/api/servers monitoring", () => {
+  it("returns an empty metrics snapshot for a stopped server", async () => {
+    const created = (await app.inject({ method: "POST", url: "/api/servers", payload: body() })).json().data;
+
+    const res = await app.inject({ method: "GET", url: `/api/servers/${created.id}/metrics` });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().data).toEqual({ running: false, pid: null, startedAt: null, snapshot: null, history: [] });
+  });
+
+  it("returns an empty player list for a stopped server", async () => {
+    const created = (await app.inject({ method: "POST", url: "/api/servers", payload: body() })).json().data;
+
+    const res = await app.inject({ method: "GET", url: `/api/servers/${created.id}/players` });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().data).toEqual({ running: false, online: [], activity: [] });
+  });
+
+  it("rejects metrics for an unknown server", async () => {
+    const res = await app.inject({ method: "GET", url: "/api/servers/does-not-exist/metrics" });
+    expect(res.statusCode).toBe(404);
+  });
+});

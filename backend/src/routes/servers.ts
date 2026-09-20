@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { serverService } from "../services/serverService.js";
 import { propertiesService } from "../services/propertiesService.js";
+import { metricsService } from "../monitoring/metricsService.js";
 import { success } from "../utils/api.js";
 import { ApiError } from "../utils/api.js";
 import { isValidPropertyKey } from "../minecraft/serverProperties.js";
@@ -152,5 +153,15 @@ export async function serverRoutes(app: FastifyInstance): Promise<void> {
         changes.values !== undefined ? { values: changes.values } : { raw: changes.raw! },
       ),
     );
+  });
+
+  app.get("/api/servers/:id/metrics", async (request) => {
+    const { id } = request.params as { id: string };
+    return success(metricsService.snapshot(id));
+  });
+
+  app.get("/api/servers/:id/players", async (request) => {
+    const { id } = request.params as { id: string };
+    return success(metricsService.players(id));
   });
 }

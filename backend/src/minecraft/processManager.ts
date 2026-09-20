@@ -18,6 +18,7 @@ export type SpawnFn = (
 export interface ProcessManagerEvents {
   state: (serverId: string, status: ServerStatus, info?: string) => void;
   console: (serverId: string, line: string, timestamp: number) => void;
+  started: (serverId: string, pid: number, startedAt: number) => void;
 }
 
 interface RunningInstance {
@@ -50,6 +51,7 @@ export class ProcessManager {
   private readonly listeners: { [K in keyof ProcessManagerEvents]: Set<ProcessManagerEvents[K]> } = {
     state: new Set(),
     console: new Set(),
+    started: new Set(),
   };
   private readonly spawnFn: SpawnFn;
 
@@ -163,6 +165,7 @@ export class ProcessManager {
     };
     this.running.set(instance.id, run);
     this.emit("state", instance.id, "STARTING");
+    this.emit("started", instance.id, child.pid ?? 0, run.startedAt);
 
     this.pushLine(instance.id, `[manager] launching: ${instance.javaPath} ${args.join(" ")}`);
 
