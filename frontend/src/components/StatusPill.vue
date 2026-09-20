@@ -1,6 +1,8 @@
 <script setup lang="ts">
+export type PillStatus = "online" | "offline" | "starting" | "stopping" | "crashed" | "unknown" | "healthy" | "degraded";
+
 defineProps<{
-  status: "online" | "offline" | "starting" | "stopping" | "crashed" | "unknown" | "healthy" | "degraded";
+  status: PillStatus;
 }>();
 </script>
 
