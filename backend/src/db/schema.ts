@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, index } from "drizzle-orm/sqlite-core";
 
 /**
  * Database schema.
@@ -8,6 +8,9 @@ import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
  * `servers` stores metadata for Minecraft server instances. Runtime files
  * (worlds, jars, server.properties, mods) live on disk; only configuration
  * that the manager owns lives here.
+ *
+ * `consoleLogs` persists the captured console output per server so the history
+ * survives process restarts and reloads.
  */
 
 export const appMeta = sqliteTable("app_meta", {
@@ -34,3 +37,17 @@ export const servers = sqliteTable("servers", {
 
 export type ServerRow = typeof servers.$inferSelect;
 export type NewServerRow = typeof servers.$inferInsert;
+
+export const consoleLogs = sqliteTable(
+  "console_logs",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    serverId: text("server_id").notNull(),
+    line: text("line").notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [index("console_logs_server_id_idx").on(table.serverId, table.id)],
+);
+
+export type ConsoleLogRow = typeof consoleLogs.$inferSelect;
+export type NewConsoleLogRow = typeof consoleLogs.$inferInsert;

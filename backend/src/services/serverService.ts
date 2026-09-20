@@ -11,6 +11,7 @@ import { wsHub } from "../websocket/hub.js";
 import { ApiError } from "../utils/api.js";
 import { isServerStatus } from "../minecraft/serverState.js";
 import { logger } from "../config/logger.js";
+import { consoleService } from "./consoleService.js";
 
 const DEFAULT_PORT = 25565;
 
@@ -54,6 +55,7 @@ export class ServerService {
       wsHub.broadcast({ type: "server.status", serverId, status });
     });
     processManager.on("console", (serverId, line, timestamp) => {
+      consoleService.handleLine(serverId, line, timestamp);
       wsHub.broadcast({ type: "server.console", serverId, line, timestamp });
     });
   }
@@ -124,6 +126,7 @@ export class ServerService {
       throw new ApiError("SERVER_RUNNING_CANNOT_DELETE", "Stop the server before deleting it.", 409);
     }
     await serverRepository.delete(id);
+    consoleService.clear(id);
   }
 
   status(id: string): { instance: ServerRow; status: string; running: boolean } {
@@ -163,9 +166,16 @@ export class ServerService {
     processManager.sendCommand(id, command);
   }
 
-  consoleLines(id: string): string[] {
+  consoleLines(id: string, limit?: number): Array<{ line: string; timestamp: number }> {
     serverRepository.getOrThrow(id);
-    return processManager.consoleLines(id);
+    return consoleService.history(id, limit);
+  }
+
+  clearConsole(id: string): { id: string; cleared: boolean; removed: number } {
+    serverRepository.getOrThrow(id);
+    const { removed } = consoleService.clear(id);
+    wsHub.broadcast({ type: "server.consoleCleared", serverId: id });
+    return { id, cleared: true, removed };
   }
 
   private async assertDirectoryFree(directory: string, exceptId?: string): Promise<void> {

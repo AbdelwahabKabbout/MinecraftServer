@@ -14,7 +14,12 @@ export interface ServerConsoleEvent {
   timestamp: number;
 }
 
-export type HubEvent = ServerStatusEvent | ServerConsoleEvent;
+export interface ServerConsoleClearedEvent {
+  type: "server.consoleCleared";
+  serverId: string;
+}
+
+export type HubEvent = ServerStatusEvent | ServerConsoleEvent | ServerConsoleClearedEvent | { type: "hub.hello"; uptimeSeconds: number };
 
 /**
  * Central WebSocket hub. Server connections register/unregister and typed

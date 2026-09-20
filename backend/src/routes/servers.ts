@@ -98,6 +98,13 @@ export async function serverRoutes(app: FastifyInstance): Promise<void> {
 
   app.get("/api/servers/:id/console", async (request) => {
     const { id } = request.params as { id: string };
-    return success({ lines: serverService.consoleLines(id) });
+    const query = request.query as { limit?: string };
+    const limit = query.limit ? Number(query.limit) : undefined;
+    return success({ lines: serverService.consoleLines(id, limit) });
+  });
+
+  app.delete("/api/servers/:id/console", async (request) => {
+    const { id } = request.params as { id: string };
+    return success(serverService.clearConsole(id));
   });
 }

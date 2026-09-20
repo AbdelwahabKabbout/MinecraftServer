@@ -170,3 +170,62 @@ describe("/api/servers detection and status", () => {
     expect(res.json().error.code).toBe("SERVER_DIRECTORY_MISSING");
   });
 });
+
+describe("/api/servers console", () => {
+  it("returns persisted console lines ordered oldest-first", async () => {
+    const created = (await app.inject({ method: "POST", url: "/api/servers", payload: body() })).json().data;
+    const { consoleRepository } = await import("../repositories/consoleRepository.js");
+    consoleRepository.insert(created.id, [
+      { line: "first line", timestamp: 1000 },
+      { line: "second line", timestamp: 2000 },
+    ]);
+
+    const res = await app.inject({ method: "GET", url: `/api/servers/${created.id}/console` });
+    expect(res.statusCode).toBe(200);
+    const lines = res.json().data.lines;
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toEqual({ line: "first line", timestamp: 1000 });
+    expect(lines[1]).toEqual({ line: "second line", timestamp: 2000 });
+  });
+
+  it("respects the limit and default of the console read", async () => {
+    const created = (await app.inject({ method: "POST", url: "/api/servers", payload: body() })).json().data;
+    const { consoleRepository } = await import("../repositories/consoleRepository.js");
+    for (let i = 0; i < 5; i += 1) {
+      consoleRepository.insert(created.id, [{ line: `line ${i}`, timestamp: i * 10 }]);
+    }
+
+    const res = await app.inject({ method: "GET", url: `/api/servers/${created.id}/console?limit=2` });
+    expect(res.json().data.lines.map((l: { line: string }) => l.line)).toEqual(["line 3", "line 4"]);
+  });
+
+  it("clears the console and returns the number of removed lines", async () => {
+    const created = (await app.inject({ method: "POST", url: "/api/servers", payload: body() })).json().data;
+    const { consoleRepository } = await import("../repositories/consoleRepository.js");
+    consoleRepository.insert(created.id, [
+      { line: "a", timestamp: 1 },
+      { line: "b", timestamp: 2 },
+    ]);
+
+    const res = await app.inject({ method: "DELETE", url: `/api/servers/${created.id}/console` });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().data).toEqual({ id: created.id, cleared: true, removed: 2 });
+
+    const after = await app.inject({ method: "GET", url: `/api/servers/${created.id}/console` });
+    expect(after.json().data.lines).toHaveLength(0);
+  });
+
+  it("404s for unknown servers", async () => {
+    const res = await app.inject({ method: "GET", url: "/api/servers/nope/console" });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it("removes console history when the server is deleted", async () => {
+    const created = (await app.inject({ method: "POST", url: "/api/servers", payload: body() })).json().data;
+    const { consoleRepository } = await import("../repositories/consoleRepository.js");
+    consoleRepository.insert(created.id, [{ line: "gone soon", timestamp: 1 }]);
+
+    await app.inject({ method: "DELETE", url: `/api/servers/${created.id}` });
+    expect(consoleRepository.count(created.id)).toBe(0);
+  });
+});
