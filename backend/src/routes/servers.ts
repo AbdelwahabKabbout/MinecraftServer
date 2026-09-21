@@ -6,6 +6,7 @@ import { metricsService } from "../monitoring/metricsService.js";
 import { success } from "../utils/api.js";
 import { ApiError } from "../utils/api.js";
 import { isValidPropertyKey } from "../minecraft/serverProperties.js";
+import { networkService } from "../services/networkService.js";
 
 const createServerSchema = z.object({
   name: z.string().trim().min(1, "Name is required").max(64),
@@ -163,5 +164,14 @@ export async function serverRoutes(app: FastifyInstance): Promise<void> {
   app.get("/api/servers/:id/players", async (request) => {
     const { id } = request.params as { id: string };
     return success(metricsService.players(id));
+  });
+
+  app.get("/api/servers/:id/network", async (request) => {
+    const { id } = request.params as { id: string };
+    return success(await networkService.networkForServer(id));
+  });
+
+  app.get("/api/networking/providers", async () => {
+    return success(await networkService.providers());
   });
 }

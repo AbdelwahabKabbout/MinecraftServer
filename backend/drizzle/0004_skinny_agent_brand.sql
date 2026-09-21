@@ -1,0 +1,1 @@
+ALTER TABLE `servers` ADD `network_provider` text DEFAULT 'local' NOT NULL;

@@ -100,6 +100,21 @@ export interface PlayersDoc {
   activity: PlayerActivity[];
 }
 
+export interface NetworkProviderInfo {
+  kind: "local" | "port-forward" | "tunnel";
+  label: string;
+}
+
+export interface ServerNetworkReport {
+  serverId: string;
+  serverPort: number;
+  provider: NetworkProviderInfo["kind"] | string;
+  label: string;
+  usable: boolean;
+  note: string;
+  addresses: Array<{ host: string; port: number }>;
+}
+
 export const serverService = {
   list(): Promise<ManagedServer[]> {
     return apiGet<ManagedServer[]>("/servers");
@@ -152,6 +167,12 @@ export const serverService = {
   },
   players(id: string): Promise<PlayersDoc> {
     return apiGet<PlayersDoc>(`/servers/${id}/players`);
+  },
+  network(id: string): Promise<ServerNetworkReport> {
+    return apiGet<ServerNetworkReport>(`/servers/${id}/network`);
+  },
+  networkProviders(): Promise<NetworkProviderInfo[]> {
+    return apiGet<NetworkProviderInfo[]>("/networking/providers");
   },
 };
 

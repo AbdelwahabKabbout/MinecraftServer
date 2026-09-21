@@ -6,6 +6,7 @@ import EmptyState from "@/components/EmptyState.vue";
 import ConsolePanel from "@/components/ConsolePanel.vue";
 import PropertiesPanel from "@/components/PropertiesPanel.vue";
 import MetricsPanel from "@/components/MetricsPanel.vue";
+import NetworkingPanel from "@/components/NetworkingPanel.vue";
 import { useServersStore } from "@/stores/servers";
 import type { DetectionReport, ManagedServer, ServerStatus } from "@/services/servers";
 
@@ -194,6 +195,8 @@ function blockerList(report: DetectionReport): string[] {
     </section>
 
     <MetricsPanel v-if="server" :server-id="server.id" :running="running" />
+
+    <NetworkingPanel v-if="server" :server-id="server.id" />
 
     <PropertiesPanel v-if="server" :server-id="server.id" />
 

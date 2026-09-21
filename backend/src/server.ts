@@ -9,6 +9,7 @@ import { serverRoutes } from "./routes/servers.js";
 import { modpackRoutes } from "./routes/modpacks.js";
 import { buildErrorHandler } from "./routes/errorHandler.js";
 import { wsHub } from "./websocket/hub.js";
+import "./networking/index.js";
 
 export async function buildApp(options: { logger?: boolean } = {}): Promise<FastifyInstance> {
   const app = Fastify({

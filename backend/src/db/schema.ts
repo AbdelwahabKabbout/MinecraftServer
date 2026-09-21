@@ -31,6 +31,7 @@ export const servers = sqliteTable("servers", {
   memoryMaxMb: integer("memory_max_mb").notNull(),
   port: integer("port").notNull().default(25565),
   status: text("status").notNull().default("OFFLINE"),
+  networkProvider: text("network_provider").notNull().default("local"),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 });
