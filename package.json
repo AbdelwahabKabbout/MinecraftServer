@@ -12,9 +12,12 @@
     "dev:backend": "npm run dev --workspace backend",
     "dev:frontend": "npm run dev --workspace frontend",
     "build": "npm run build --workspace backend && npm run build --workspace frontend",
-    "test": "npm run test --workspace backend",
-    "typecheck": "npm run typecheck --workspace backend && npm run typecheck --workspace frontend",
+    "test": "npm run test --workspace backend && npm run test --workspace launcher",
+    "typecheck": "npm run typecheck --workspace backend && npm run typecheck --workspace frontend && npm run typecheck --workspace launcher",
     "db:generate": "npm run db:generate --workspace backend",
-    "db:migrate": "npm run db:migrate --workspace backend"
+    "db:migrate": "npm run db:migrate --workspace backend",
+    "launcher:validate": "tsx launcher/src/cli.ts validate",
+    "launcher:sync": "tsx launcher/src/cli.ts sync",
+    "launcher:launch": "tsx launcher/src/cli.ts launch"
   }
 }

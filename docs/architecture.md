@@ -1,6 +1,6 @@
 # Architecture
 
-This document describes the Minecraft Server Manager backend architecture. The live console, `server.properties` editing and monitoring are built on it; modpacks and networking slot into the interfaces defined here.
+This document describes the Minecraft Server Manager backend architecture. Console, configuration, monitoring, modpacks and networking are built on top of the core.
 
 ## Principles
 
@@ -27,15 +27,15 @@ This document describes the Minecraft Server Manager backend architecture. The l
   ```
 
 - All manager endpoints are mounted under `/api`. The bare `/` and `/api` routes advertise the API.
-- Server routes (`routes/servers.ts`) cover CRUD, status, detection, start/stop/restart, command, console (GET history/DELETE clear), properties (GET/PUT), metrics (GET) and players (GET).
+- Server routes (`routes/servers.ts`) cover CRUD, status, detection, start/stop/restart, command, console (GET history/DELETE clear), properties (GET/PUT), metrics (GET), players (GET) and network (GET). Modpack routes (`routes/modpacks.ts`) cover CRUD, import, manifest export and validation.
 - Property patches are validated with Zod (well-formed keys, newline-free values, exactly one of `values`/`raw`). Raw-save rejects malformed documents with a line-level `details` array.
 
 ### Database (`backend/src/db`, `repositories/`)
 
 - SQLite via `better-sqlite3`, accessed through Drizzle ORM.
-- Schema is defined in `src/db/schema.ts`: `app_meta` (small key/value metadata), `servers` (instance configuration only) and `console_logs` (persisted console output per server). Migrations are generated with Drizzle Kit into `backend/drizzle/` and applied on startup (and manually with `db:migrate`).
+- Schema is defined in `src/db/schema.ts`: `app_meta` (small key/value metadata), `servers` (instance configuration only, incl. `network_provider`), `console_logs` (persisted console output per server) and `modpacks` (pack metadata; the manifest JSON is the source of truth). Migrations are generated with Drizzle Kit into `backend/drizzle/` and applied on startup (and manually with `db:migrate`).
 - The schema stores metadata only. Minecraft files (worlds, jars, properties) are never duplicated into tables.
-- `repositories/serverRepository.ts` and `repositories/consoleRepository.ts` are thin data-access layers over Drizzle.
+- `repositories/serverRepository.ts`, `repositories/consoleRepository.ts` and `repositories/modpackRepository.ts` are thin data-access layers over Drizzle.
 
 ### Configuration (`backend/src/config`)
 
@@ -53,6 +53,8 @@ This document describes the Minecraft Server Manager backend architecture. The l
 - **Console log** (`services/consoleService.ts`, `repositories/consoleRepository.ts`): batches console lines into SQLite (flushed every 100ms) and prunes each server's history to the newest 2000 rows, so the console survives process restarts and reloads. `GET /api/servers/:id/console` reads history oldest-first (optional `limit`); `DELETE` clears it (history is also removed when the server is deleted).
 - **Properties service** (`services/propertiesService.ts`): reads `server.properties` and applies single-key patches (`setProperty`/`removeProperty`) to the on-disk text so comments, ordering and unknown keys survive. Missing files are created with a header on save; missing directories are rejected (`SERVER_DIRECTORY_MISSING`).
 - **Monitoring** (`monitoring/metricsService.ts`, `monitoring/processMetrics.ts`): a per-server sampler runs every 5 s while the process is up. It reads CPU time + resident memory with platform-native readers (Linux `/proc/<pid>/stat` + `/proc/<pid>/status`, Windows `Get-Process`; other platforms gracefully skip). CPU% is elapsed-time-based (percent appears from the second sample); RAM is reported in MB. The newest ~144 samples (~12 min) are kept and exposed via `GET /:id/metrics`. Join/leave is parsed from console lines (`X joined the game` / `X left the game`), maintaining an online list and a bounded activity feed (`GET /:id/players`). The `started` process event provides pid/startedAt; the sampler deregisters on `CRASHED`/`OFFLINE`. Samples and player changes go out over the hub as `server.metrics` / `server.playerActivity`.
+- **Modpacks** (`modpacks/manifest.ts`, `services/modpackService.ts`, `repositories/modpackRepository.ts`): the manifest format (zod) enforces lowercase-safe unique ids, plain `*.jar` filenames, optional `sha256`/`downloadUrl`, and `required` defaulting to true. The service stores metadata (slug, name, versions, loader) plus the JSON text; it can import text, export the raw doc, and validate a pack against a server's `mods/` — reporting `ok`/`missing`/`version-mismatch` (same mod id, different filename)/`checksum-mismatch`/`unexpected`, read-only.
+- **Networking** (`networking/networkProvider.ts`, `networking/localNetworkProvider.ts`, `services/networkService.ts`): a `NetworkProvider` registry with a swappable interface; the `LocalNetworkProvider` resolves deduplicated local IPv4 addresses (private first, loopback fallback) from `os.networkInterfaces`. `GET /api/servers/:id/network` combines provider resolution with the server's port; `GET /api/networking/providers` lists registered kinds, and an unregistered `network_provider` value returns `NETWORK_PROVIDER_NOT_FOUND` (422).
 - **Path safety** (`utils/pathSafety.ts`): every instance directory is validated as a relative path under `serverRoot` — no traversal, no absolute paths, no drive segments.
 
 ### Server properties frontend (`frontend/src/components/PropertiesPanel.vue`)
@@ -79,13 +81,28 @@ This document describes the Minecraft Server Manager backend architecture. The l
 - CPU% and RAM tiles with thin progress bars, uptime, PID and last-sample time.
 - Online players as chips plus a timestamped join/leave activity feed. Stopping the server resets the snapshot and empties the player list.
 
+### Modpacks frontend (`frontend/src/views/ModpacksView.vue`, `stores/modpacks.ts`)
+
+- List of packs (slug/name/version/MC version) with create, JSON import, JSON editor (local syntax check + API validation), export (downloads the raw manifest) and delete.
+- Validate against a chosen server renders a summary (ok/missing/version-mismatch/checksum-mismatch/unexpected chips) plus a per-file report; it never writes to `mods/`.
+
+### Networking frontend (`frontend/src/components/NetworkingPanel.vue`)
+
+- Renders the resolved `host:port` addresses with scheme badges ("This machine" for loopback, "LAN" otherwise) and per-address copy-to-clipboard.
+- Independent refresh; reports unusable hosts with guidance.
+
+### Launcher (`launcher/`, separate workspace)
+
+- Self-contained Node CLI (no runtime dependencies) sharing only the manifest *contract* with the backend — it mirrors the schema so packs can be applied without the manager running.
+- `validate [--dir]` — schema check plus a read-only report with the same levels as the API; `sync --dir` — downloads missing/checksum-mismatched mods from `downloadUrl`, verifies `sha256`, recognizes version lookalikes, leaves unexpected jars untouched; `launch [--dir]` — optional preflight sync, then spawns `java -Xms.. -Xmx.. -jar <fabric-server-*.jar|server.jar> nogui` with an injectable spawn for tests.
+
 ## Planned components (later milestones)
 
 | Component            | Responsibility                                                                 |
 | -------------------- | ------------------------------------------------------------------------------ |
 | `minecraft/version`  | Version probing / server JAR download                                          |
-| `modpacks/`          | Manifest model, validation (missing/unexpected/version/checksum), import/export |
-| `networking/`        | `NetworkProvider` interface with a `LocalNetworkProvider` implementation        |
+| port-forward / tunnel providers | Additional `NetworkProvider` implementations for WAN play               |
+| Client installer     | A Minecraft *client* distribution path (game + libraries download)             |
 
 ## Process safety rules
 

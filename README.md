@@ -2,7 +2,7 @@
 
 A local-first web application for creating, controlling, monitoring and configuring Minecraft **Java Edition** server instances, with an architecture ready for modpack management and client-side modpack distribution.
 
-> **Status: Monitoring milestone (Phase 5).** Instances can be registered against directories in `servers/`, detected (jar, EULA, structure), started/stopped/restarted through a safe Java process manager, observed live (persistent console + command input), configured through a `server.properties` editor that preserves comments, ordering and unknown keys, and monitored live (CPU/RAM sampled every 5 s, uptime/PID, online players with join/leave feed — all over WebSocket). Modpacks and networking are implemented in subsequent milestones.
+> **Status: Client distribution milestone (Phase 8) — all planned milestones complete.** The manager registers server instances against directories in `servers/`, detects them (jar, EULA, structure), starts/stops/restarts them through a safe Java process manager, observes them live (persistent console + command input), configures them (a `server.properties` editor that preserves comments, ordering and unknown keys), monitors them live (CPU/RAM every 5 s, uptime/PID, online players over WebSocket), tracks modpacks as immutable manifests (import/export/validate against `mods/`), reports LAN connection addresses, and ships a standalone `launcher/` CLI that applies a manifest to any mods directory and runs the server.
 
 ---
 
@@ -66,10 +66,11 @@ Adjust `HTTP_PORT`, `DATABASE_URL`, `SERVER_ROOT`, `JAVA_PATH`, memory defaults 
 | `npm run dev:backend`       | Start the backend (tsx watch) on `:3000`  |
 | `npm run dev:frontend`      | Start the frontend (Vite) on `:5173`      |
 | `npm run build`             | Type-check + build backend and frontend   |
-| `npm run test`              | Run backend tests (Vitest)                |
-| `npm run typecheck`         | Type-check both workspaces                |
+| `npm run test`              | Run all workspace tests (Vitest)          |
+| `npm run typecheck`         | Type-check all workspaces                 |
 | `npm run db:generate`       | Generate a Drizzle migration              |
 | `npm run db:migrate`        | Apply pending migrations manually         |
+| `npm run launcher:sync`     | Run the launcher CLI from the repo root   |
 
 The Vite dev server proxies `/api` and `/ws` to the backend, so the frontend talks to a single origin.
 
@@ -101,6 +102,9 @@ MinecraftServer/
 │   │   ├── config/        env parsing (zod), logger
 │   │   ├── db/            SQLite (better-sqlite3) + Drizzle, migrations
 │   │   ├── minecraft/     detection, server.properties, process manager, state machine
+│   │   ├── modpacks/      manifest schema + parsing
+│   │   ├── monitoring/    metrics sampling (CPU/RAM), player tracking
+│   │   ├── networking/    swappable network providers (LAN resolution)
 │   │   ├── repositories/  thin data-access layer over Drizzle
 │   │   ├── routes/        Fastify routes + error handler
 │   │   ├── services/      domain services tying repositories/process/files together
@@ -112,13 +116,14 @@ MinecraftServer/
 │   └── package.json
 ├── frontend/
 │   └── src/
-│       ├── components/    reusable UI (StatusPill, dialogs, form modal)
+│       ├── components/    reusable UI (StatusPill, dialogs, form modal, panels)
 │       ├── views/         pages (dashboard, servers, modpacks, settings)
 │       ├── layouts/       app shell (sidebar)
-│       ├── stores/        Pinia state (system, servers)
+│       ├── stores/        Pinia state (system, servers, modpacks)
 │       ├── services/      API client (axios + WebSocket)
 │       ├── router/
 │       └── main.ts
+├── launcher/              standalone CLI: validate/sync/launch a modpack (see below)
 ├── servers/               Minecraft server instances live here (gitignored)
 ├── docs/                  architecture and feature documentation
 ├── .env.example
@@ -187,6 +192,34 @@ While a server is running, the manager samples the Java process every 5 seconds 
 - **Online players**: join/leave is detected by parsing console output (`X joined the game` / `X left the game`). The player list and a timestamped activity feed update live; the current list is also served over REST.
 - Live values arrive over `/ws` as `server.metrics` and `server.playerActivity` events; they stop/reset when the server stops.
 
+### Modpacks
+
+A modpack is an **immutable, exportable manifest** (JSON) describing the mod environment a server — or, later, a client launcher — should have. Details: [docs/modpack-system.md](docs/modpack-system.md).
+
+- The **Modpacks** page lists packs, imports a JSON file, and offers a manifest editor for creating/editing them (names, versions, MC version, Fabric loader, and up to 500 mod entries).
+- Each mod entry declares an id, name, version, a plain `*.jar` filename, an optional `downloadUrl` and an optional `sha256`. Filenames must be plain jar names (no paths); ids must be unique and lowercase-safe; `required` defaults to `true`.
+- **Export** downloads the current manifest as a file. The manifest is the source of truth — SQLite stores only metadata.
+- **Validate against a server**: a read-only check of the pack against a server's `mods/` directory. It reports `ok`, `missing`, `version-mismatch` (same mod, different filename, e.g. `sodium-0.5.0.jar` vs `sodium.jar`), `checksum-mismatch`, and `unexpected` jars — and never writes to `mods/`.
+
+### Networking
+
+- The **Network access** panel on a server resolves the LAN addresses clients should use to join: private IPv4 addresses first, loopback as a last resort, each as `host:port` with a copy button.
+- Resolution goes through a swappable **`NetworkProvider`** abstraction (`backend/src/networking/`). The local provider is registered by default; a per-server `network_provider` column and `GET /api/networking/providers` are the seams for future port-forward/tunnel providers. See [docs/networking.md](docs/networking.md).
+
+### Launcher (client distribution)
+
+The `launcher/` workspace is a self-contained Node CLI (no runtime dependencies) that applies a modpack anywhere the manager isn't running — the seed of a client-side distribution story:
+
+```bash
+npm run launcher:validate -- <manifest.json> [--dir <modsDir>]   # schema + read-only report
+npm run launcher:sync     -- <manifest.json> --dir <modsDir>     # download + verify sha256
+npm run launcher:launch   -- [<manifest.json>] --dir <serverDir> # preflight sync, then run
+```
+
+- `validate` checks the schema and, with `--dir`, produces the same report levels as the API (ok/missing/version-mismatch/checksum-mismatch/unexpected) without writing anything.
+- `sync` downloads missing or checksum-mismatched mods from their `downloadUrl`, verifies each against `sha256`, recognizes version lookalikes, and leaves unexpected jars untouched.
+- `launch` optionally syncs first, then spawns the Fabric server (`-Xms`/`-Xmx`, `-jar <fabric-server-*.jar|server.jar> nogui`).
+
 ### API surface
 
 | Method | Endpoint | Purpose |
@@ -206,6 +239,14 @@ While a server is running, the manager samples the Java process every 5 seconds 
 | PUT | `/api/servers/:id/properties` | Patch values (`{values}`) or write raw text (`{raw}`) |
 | GET | `/api/servers/:id/metrics` | Latest sample + short history (CPU%, RAM) for a running server |
 | GET | `/api/servers/:id/players` | Online player list + join/leave activity feed |
+| GET | `/api/servers/:id/network` | Resolved connection addresses (LAN) the clients use to join |
+| GET | `/api/networking/providers` | Registered network providers |
+| GET | `/api/modpacks` | List modpacks |
+| POST | `/api/modpacks` | Create a modpack from a manifest |
+| POST | `/api/modpacks/import` | Import a manifest from JSON text (`{text}`) |
+| GET/PUT/DELETE | `/api/modpacks/:id` | Read/update/delete a modpack |
+| GET | `/api/modpacks/:id/manifest` | Export the raw manifest JSON |
+| GET | `/api/modpacks/:id/validate?serverId=` | Read-only report of the pack against a server's `mods/` |
 
 ## Documentation
 
@@ -214,11 +255,12 @@ While a server is running, the manager samples the Java process every 5 seconds 
 - [docs/modpack-system.md](docs/modpack-system.md) — modpack manifest format, validation and distribution plan
 - [docs/networking.md](docs/networking.md) — LAN-first networking and the `NetworkProvider` abstraction
 
-## Known limitations (Phase 5)
+## Known limitations
 
 - CPU/RAM sampling is implemented for Linux (`/proc`) and Windows (`Get-Process`); on other platforms metrics are simply not collected. CPU% needs two samples (≈5 s) to appear.
 - Player join/leave detection relies on standard console lines (`joined the game` / `left the game`); servers that suppress or rename those lines will not update the list (RCON-based probing is a possible follow-up).
-- Modpack definitions and validation are **not yet implemented**
+- Only the **local** network provider is implemented; `port-forward` and `tunnel` providers are registered seams, not shipped.
+- The launcher syncs mods into a directory and runs a server; it is not a Minecraft *client* installer (no game/libraries download).
 - No authentication: the manager binds locally / on your LAN by default. Do not expose it directly to the public internet.
 
 ## Roadmap
@@ -227,8 +269,8 @@ While a server is running, the manager samples the Java process every 5 seconds 
 2. ✅ **Console** — persistent console log, live WebSocket streaming, autoscroll, highlighting, command input with history
 3. ✅ **Configuration** — `server.properties` editor (structured form + raw mode) on top of the round-tripping parser
 4. ✅ **Monitoring** — CPU/RAM sampling, uptime/PID, online players with a join/leave feed, live WebSocket updates
-5. **Modpacks** — manifests, import/export, checksum validation
-6. **Networking** — LAN connection info, `NetworkProvider` abstraction
-7. **Client distribution** — a companion launcher that reads manifests, verifies `sha256` and launches Minecraft
+5. ✅ **Modpacks** — manifests, import/export, checksum validation (and read-only validation against a server)
+6. ✅ **Networking** — LAN connection info, `NetworkProvider` abstraction
+7. ✅ **Client distribution** — a companion launcher that reads manifests, verifies `sha256` and launches the server
 
 See [docs/modpack-system.md](docs/modpack-system.md) and [docs/networking.md](docs/networking.md) for the forward-looking plans.
