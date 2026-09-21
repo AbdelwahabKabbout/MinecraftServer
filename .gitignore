@@ -34,6 +34,9 @@ servers/*
 *.jar
 *.mrpack
 
+# Locally downloaded tooling (JDKs etc.)
+tools/
+
 # OS
 .DS_Store
 Thumbs.db
